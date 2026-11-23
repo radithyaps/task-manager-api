@@ -1,0 +1,236 @@
+{
+  "info": {
+    "name": "Task Manager API",
+    "description": "Jalankan berurutan pada database demo. Dua akun baru digunakan untuk menguji bahwa task hanya dapat diakses oleh pemiliknya. Login memberikan satu JWT Bearer. Untuk menguji API yang sudah di-deploy, arahkan baseUrl ke https://task-manager-api-production-b16dd331.up.railway.app atau jalankan: npm test -- --env-var baseUrl=https://task-manager-api-production-b16dd331.up.railway.app",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://127.0.0.1:3000" },
+    { "key": "email", "value": "" },
+    { "key": "password", "value": "" },
+    { "key": "accessToken", "value": "" },
+    { "key": "otherEmail", "value": "" },
+    { "key": "otherPassword", "value": "" },
+    { "key": "otherToken", "value": "" },
+    { "key": "taskId", "value": "" }
+  ],
+  "item": [
+    {
+      "name": "1. Kesehatan",
+      "item": [
+        {
+          "name": "Server hidup",
+          "request": { "method": "GET", "url": "{{baseUrl}}/health" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Server hidup', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.equal('ok'); });"
+          ] } }]
+        },
+        {
+          "name": "Database siap",
+          "request": { "method": "GET", "url": "{{baseUrl}}/health/ready" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Database terhubung', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().status).to.equal('ready'); });"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "2. Autentikasi",
+      "item": [
+        {
+          "name": "Register akun demo",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"name\": \"Pengguna Postman\",\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}", "options": { "raw": { "language": "json" } } }
+          },
+          "event": [
+            { "listen": "prerequest", "script": { "type": "text/javascript", "exec": [
+              "const id = pm.variables.replaceIn('{{$guid}}');",
+              "pm.collectionVariables.set('email', pm.environment.get('demoEmail') || ('postman.' + id + '@example.test'));",
+              "pm.collectionVariables.set('password', pm.variables.replaceIn('{{$guid}}'));",
+              "pm.collectionVariables.set('otherEmail', pm.environment.get('demoOtherEmail') || ('postman.b.' + id + '@example.test'));",
+              "pm.collectionVariables.set('otherPassword', pm.variables.replaceIn('{{$guid}}'));"
+            ] } },
+            { "listen": "test", "script": { "type": "text/javascript", "exec": [
+              "pm.test('Register menyimpan akun tanpa mengirim hash password', () => {",
+              "  pm.response.to.have.status(201); const data = pm.response.json().data;",
+              "  pm.expect(data.user.email).to.equal(pm.collectionVariables.get('email'));",
+              "  pm.expect(data.user).to.not.have.property('passwordHash');",
+              "});"
+            ] } }
+          ]
+        },
+        {
+          "name": "Tolak email yang sudah terdaftar",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/api/auth/register",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"name\":\"Duplikat\",\"email\":\"{{email}}\",\"password\":\"{{password}}\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Email duplikat: 409', () => pm.response.to.have.status(409));"
+          ] } }]
+        },
+        {
+          "name": "Tolak password yang salah",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"email\":\"{{email}}\",\"password\":\"Salah-{{password}}\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Login gagal: 401', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Login akun pertama",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/api/auth/login",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"email\":\"{{email}}\",\"password\":\"{{password}}\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Login memberi JWT yang berlaku tujuh hari', () => {",
+            "  pm.response.to.have.status(200); const data = pm.response.json().data; pm.expect(data.tokenType).to.equal('Bearer');",
+            "  pm.expect(data.expiresIn).to.equal(604800); pm.expect(data.accessToken.split('.')).to.have.lengthOf(3);",
+            "  pm.collectionVariables.set('accessToken', data.accessToken);",
+            "});"
+          ] } }]
+        },
+        {
+          "name": "Lihat profil saya",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/auth/me", "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] } },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Bearer token menunjuk ke akun yang login', () => { pm.response.to.have.status(200); const user = pm.response.json().data.user; pm.expect(user.email).to.equal(pm.collectionVariables.get('email')); pm.expect(user).not.to.have.property('passwordHash'); });"
+          ] } }]
+        }
+      ]
+    },
+    {
+      "name": "3. Task pribadi",
+      "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{accessToken}}", "type": "string" }] },
+      "item": [
+        {
+          "name": "Tanpa access token",
+          "request": { "method": "GET", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/api/tasks" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Task memerlukan login', () => pm.response.to.have.status(401));"
+          ] } }]
+        },
+        {
+          "name": "Buat task",
+          "request": {
+            "method": "POST", "url": "{{baseUrl}}/api/tasks",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\n  \"title\": \"Kirim laporan mingguan\",\n  \"description\": \"Ringkas hasil kerja tim\",\n  \"priority\": \"HIGH\",\n  \"dueDate\": \"2027-01-15T17:00:00+07:00\"\n}", "options": { "raw": { "language": "json" } } }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Task dibuat dengan status PENDING', () => { pm.response.to.have.status(201); const task = pm.response.json().data; pm.expect(task.status).to.equal('PENDING'); pm.collectionVariables.set('taskId', task.id); });"
+          ] } }]
+        },
+        {
+          "name": "Filter, pencarian, urutan dan paginasi",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/tasks?page=1&limit=5&status=PENDING&priority=HIGH&search=laporan&sortBy=createdAt&order=desc" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Hasil filter memuat task yang dibuat', () => { pm.response.to.have.status(200); const body = pm.response.json(); pm.expect(body.meta.page).to.equal(1); pm.expect(body.data.map(task => task.id)).to.include(pm.collectionVariables.get('taskId')); });"
+          ] } }]
+        },
+        {
+          "name": "Detail task",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/tasks/{{taskId}}" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('ID task benar', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.id).to.equal(pm.collectionVariables.get('taskId')); });"
+          ] } }]
+        },
+        {
+          "name": "Tolak status yang tidak dikenal",
+          "request": {
+            "method": "PATCH", "url": "{{baseUrl}}/api/tasks/{{taskId}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"status\":\"SELESAI\"}" }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Validasi menunjukkan field status', () => { pm.response.to.have.status(400); pm.expect(pm.response.json().errors.map(e => e.field)).to.include('body.status'); });"
+          ] } }]
+        },
+        {
+          "name": "Ubah status dan kosongkan tenggat",
+          "request": {
+            "method": "PATCH", "url": "{{baseUrl}}/api/tasks/{{taskId}}",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": { "mode": "raw", "raw": "{\"status\":\"COMPLETED\",\"dueDate\":null}" }
+          },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Perubahan tersimpan', () => { pm.response.to.have.status(200); const task = pm.response.json().data; pm.expect(task.status).to.equal('COMPLETED'); pm.expect(task.dueDate).to.equal(null); });"
+          ] } }]
+        },
+        {
+          "name": "Cek kepemilikan dengan akun kedua",
+          "auth": { "type": "bearer", "bearer": [{ "key": "token", "value": "{{otherToken}}", "type": "string" }] },
+          "item": [
+            {
+              "name": "Register akun kedua",
+              "request": {
+                "method": "POST", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/api/auth/register",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"name\":\"Akun Kedua\",\"email\":\"{{otherEmail}}\",\"password\":\"{{otherPassword}}\"}" }
+              },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Akun kedua dibuat', () => pm.response.to.have.status(201));"] } }]
+            },
+            {
+              "name": "Login akun kedua",
+              "request": {
+                "method": "POST", "auth": { "type": "noauth" }, "url": "{{baseUrl}}/api/auth/login",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"email\":\"{{otherEmail}}\",\"password\":\"{{otherPassword}}\"}" }
+              },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+                "pm.test('Token kedua diperoleh', () => { pm.response.to.have.status(200); const data = pm.response.json().data; pm.expect(data.user.email).to.equal(pm.collectionVariables.get('otherEmail')); pm.collectionVariables.set('otherToken', data.accessToken); });"
+              ] } }]
+            },
+            {
+              "name": "Daftar task akun kedua kosong",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/tasks" },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Daftar tidak menampilkan task orang lain', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data).to.have.lengthOf(0); pm.expect(pm.response.json().meta.total).to.equal(0); });"] } }]
+            },
+            {
+              "name": "Akun kedua tidak bisa membaca task pertama",
+              "request": { "method": "GET", "url": "{{baseUrl}}/api/tasks/{{taskId}}" },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Detail milik orang lain: 404', () => pm.response.to.have.status(404));"] } }]
+            },
+            {
+              "name": "Akun kedua tidak bisa mengubah task pertama",
+              "request": {
+                "method": "PATCH", "url": "{{baseUrl}}/api/tasks/{{taskId}}",
+                "header": [{ "key": "Content-Type", "value": "application/json" }],
+                "body": { "mode": "raw", "raw": "{\"status\":\"PENDING\"}" }
+              },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Update milik orang lain: 404', () => pm.response.to.have.status(404));"] } }]
+            },
+            {
+              "name": "Akun kedua tidak bisa menghapus task pertama",
+              "request": { "method": "DELETE", "url": "{{baseUrl}}/api/tasks/{{taskId}}" },
+              "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": ["pm.test('Hapus milik orang lain: 404', () => pm.response.to.have.status(404));"] } }]
+            }
+          ]
+        },
+        {
+          "name": "Hapus task",
+          "request": { "method": "DELETE", "url": "{{baseUrl}}/api/tasks/{{taskId}}" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Task dihapus', () => { pm.response.to.have.status(200); pm.expect(pm.response.json().data.id).to.equal(pm.collectionVariables.get('taskId')); });"
+          ] } }]
+        },
+        {
+          "name": "Task yang dihapus tidak ditemukan",
+          "request": { "method": "GET", "url": "{{baseUrl}}/api/tasks/{{taskId}}" },
+          "event": [{ "listen": "test", "script": { "type": "text/javascript", "exec": [
+            "pm.test('Task sudah hilang', () => pm.response.to.have.status(404));",
+            "['accessToken','otherToken','password','otherPassword','taskId'].forEach(key => pm.collectionVariables.unset(key));"
+          ] } }]
+        }
+      ]
+    }
+  ]
+}
